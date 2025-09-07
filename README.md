@@ -55,3 +55,7 @@ Perfect for simple circuit diagrams for **documentation, educational purposes, o
 ---
 
 ## 🖼️ Example Circuit
+
+<img width="1571" height="801" alt="image" src="https://github.com/user-attachments/assets/be08a110-409b-4e0d-959f-4db14e66d53e" />
+
+
