@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASCII Circuit Diagram Creator</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+        }
+
+        .toolbar {
+            width: 200px;
+            background: #f0f0f0;
+            padding: 16px;
+            box-sizing: border-box;
+            border-right: 1px solid #ccc;
+        }
+
+        .toolbar h2 {
+            margin: 0 0 16px 0;
+            font-size: 18px;
+        }
+
+        .toolbar button {
+            display: block;
+            width: 100%;
+            margin-bottom: 8px;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .toolbar button:hover {
+            background: #e8e8e8;
+        }
+
+        .toolbar button.selected {
+            background: #007bff;
+            color: white;
+        }
+
+        .toolbar button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .canvas {
+            flex: 1;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            background: #fafafa;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        #canvasWrapper {
+            position: relative;
+            border: 2px solid #333;
+            background: white;
+            margin: 0;
+        }
+
+        #circuitCanvas {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 18px;
+            background: white;
+            width: 1000px;
+            height: 600px;
+            overflow: hidden;
+            white-space: pre;
+            user-select: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            margin: 0;
+            padding: 4px;
+            box-sizing: border-box;
+            z-index: 1;
+            border: none;
+        }
+
+        #gridOverlay {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: calc(640px - 8px);
+            height: calc(360px - 8px);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .grid-cell {
+            position: absolute;
+            box-sizing: border-box;
+            width: 9.6px;
+            height: 18px;
+            pointer-events: auto;
+            cursor: crosshair;
+        }
+
+        .grid-cell:hover {
+            background: rgba(0, 123, 255, 0.2);
+        }
+
+        .orientation-controls {
+            margin: 16px 0;
+            padding: 8px 0;
+            border-top: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .orientation-controls label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .orientation-controls input[type="radio"] {
+            margin-right: 8px;
+        }
+
+        .undo-redo-section {
+            margin: 16px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            gap: 8px;
+        }
+
+        .undo-redo-section button {
+            flex: 1;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <h2>Components</h2>
+            <button onclick="selectComponent('wire')" id="wire-btn">Wire</button>
+            <button onclick="selectComponent('cell')" id="cell-btn">Cell</button>
+            <button onclick="selectComponent('bulb')" id="bulb-btn">Bulb</button>
+            <button onclick="selectComponent('switch')" id="switch-btn">Switch</button>
+            <button onclick="selectComponent('resistor')" id="resistor-btn">Resistor</button>
+            
+            <div class="orientation-controls">
+                <label>Orientation:</label>
+                <div>
+                    <input type="radio" id="horizontal" name="orientation" value="horizontal" checked>
+                    <label for="horizontal">Horizontal</label>
+                </div>
+                <div>
+                    <input type="radio" id="vertical" name="orientation" value="vertical">
+                    <label for="vertical">Vertical</label>
+                </div>
+            </div>
+            
+            <div class="undo-redo-section">
+                <button onclick="undo()" id="undo-btn">↶ Undo</button>
+                <button onclick="redo()" id="redo-btn">↷ Redo</button>
+            </div>
+            
+            <button onclick="clearCanvas()" style="background: #dc3545; color: white;">Clear</button>
+            <button onclick="exportCircuit()">Export</button>
+            <button onclick="copyToClipboard()">Copy to Clipboard</button>
+        </div>
+        <div class="canvas">
+            <div id="canvasWrapper">
+                <pre id="circuitCanvas"></pre>
+                <div id="gridOverlay"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ASCII symbols for components
+        const COMPONENTS = {
+            horizontal: {
+                wire: "----",
+                cell: "--| I--",
+                bulb: " (O) ",
+                switch: " / ",
+                resistor: "^^^^"
+            },
+            vertical: {
+                wire: ["│", "│", "│", "│"],
+                cell: ["│", "┬", "I", "┴"],
+                bulb: [" ", "(", "O", ")"],
+                switch: [" ", "│", "/", " "],
+                resistor: ["Λ", "V", "Λ", "V"]
+            }
+        };
+
+        let selectedComponent = null;
+        const ROWS = 20;
+        const COLS = 66;
+        const CHAR_WIDTH = 9.6;
+        const CHAR_HEIGHT = 18;
+
+        let grid = Array.from({ length: ROWS }, () => Array(COLS).fill(" "));
+        
+        // Undo/Redo functionality
+        let gridHistory = [];
+        let historyIndex = -1;
+        const MAX_HISTORY = 50;
+
+        // Save current grid state to history
+        function saveGridState() {
+            // Remove any future states if we're not at the end
+            gridHistory = gridHistory.slice(0, historyIndex + 1);
+            
+            // Create deep copy of current grid
+            const gridCopy = grid.map(row => [...row]);
+            gridHistory.push(gridCopy);
+            
+            // Limit history size
+            if (gridHistory.length > MAX_HISTORY) {
+                gridHistory.shift();
+            } else {
+                historyIndex++;
+            }
+            
+            updateUndoRedoButtons();
+        }
+
+        // Initialize with empty grid state
+        function initializeHistory() {
+            gridHistory = [];
+            historyIndex = -1;
+            saveGridState();
+        }
+
+        // Select component from toolbar
+        function selectComponent(type) {
+            selectedComponent = type;
+            
+            // Update button styles
+            const buttons = document.querySelectorAll('.toolbar button');
+            buttons.forEach(btn => btn.classList.remove('selected'));
+            document.getElementById(type + '-btn').classList.add('selected');
+        }
+
+        // Get current orientation
+        function getOrientation() {
+            return document.querySelector('input[name="orientation"]:checked').value;
+        }
+
+        // Render grid to <pre>
+        function renderGrid() {
+            const canvas = document.getElementById("circuitCanvas");
+            let output = "";
+            for (let row = 0; row < ROWS; row++) {
+                let line = "";
+                for (let col = 0; col < COLS; col++) {
+                    line += grid[row][col];
+                }
+                output += line + "\n";
+            }
+            canvas.textContent = output;
+        }
+
+        // Render grid overlay for visual aid
+        function renderGridOverlay() {
+            const overlay = document.getElementById("gridOverlay");
+            overlay.innerHTML = "";
+            
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const cell = document.createElement("div");
+                    cell.className = "grid-cell";
+                    cell.style.left = (col * CHAR_WIDTH) + "px";
+                    cell.style.top = (row * CHAR_HEIGHT) + "px";
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    cell.onclick = gridCellClick;
+                    overlay.appendChild(cell);
+                }
+            }
+        }
+
+        // Handle grid cell click for placement
+        function gridCellClick(event) {
+            if (!selectedComponent) return;
+            
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+            const orientation = getOrientation();
+            const symbol = COMPONENTS[orientation][selectedComponent];
+
+            // Save state before making changes
+            saveGridState();
+
+            if (orientation === 'horizontal') {
+                if (typeof symbol === 'string') {
+                    for (let i = 0; i < symbol.length && col + i < COLS; i++) {
+                        grid[row][col + i] = symbol[i];
+                    }
+                }
+            } else {
+                if (Array.isArray(symbol)) {
+                    for (let i = 0; i < symbol.length && row + i < ROWS; i++) {
+                        grid[row + i][col] = symbol[i];
+                    }
+                }
+            }
+            
+            renderGrid();
+        }
+
+        // Undo function
+        function undo() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                grid = gridHistory[historyIndex].map(row => [...row]);
+                renderGrid();
+                updateUndoRedoButtons();
+            }
+        }
+
+        // Redo function
+        function redo() {
+            if (historyIndex < gridHistory.length - 1) {
+                historyIndex++;
+                grid = gridHistory[historyIndex].map(row => [...row]);
+                renderGrid();
+                updateUndoRedoButtons();
+            }
+        }
+
+        // Update undo/redo button states
+        function updateUndoRedoButtons() {
+            const undoBtn = document.getElementById('undo-btn');
+            const redoBtn = document.getElementById('redo-btn');
+            
+            undoBtn.disabled = historyIndex <= 0;
+            redoBtn.disabled = historyIndex >= gridHistory.length - 1;
+        }
+
+        // Clear canvas
+        function clearCanvas() {
+            grid = Array.from({ length: ROWS }, () => Array(COLS).fill(" "));
+            renderGrid();
+            initializeHistory();
+        }
+
+        // Export circuit as text
+        function exportCircuit() {
+            const text = grid.map(row => row.join("").trimEnd()).join("\n");
+            const blob = new Blob([text], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "circuit.txt";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Copy to clipboard
+        function copyToClipboard() {
+            const text = grid.map(row => row.join("").trimEnd()).join("\n");
+            navigator.clipboard.writeText(text).then(() => {
+                alert("Circuit copied to clipboard!");
+            });
+        }
+
+        // Initial render
+        window.onload = () => {
+            initializeHistory();
+            renderGrid();
+            renderGridOverlay();
+        };
+    </script>
+</body>
+</html>
