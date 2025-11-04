@@ -7,7 +7,7 @@ Perfect for simple circuit diagrams for **documentation, educational purposes, o
 
 ### Draw Now
 
-**[Launch Studio →](https://sakshissg.github.io/ASCII_Circuit_Diagram_Creator)**
+**[Launch Creator →](https://sakshissg.github.io/ASCII_Circuit_Diagram_Creator)**
 
 
 ## ✨ Features
